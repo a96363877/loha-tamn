@@ -182,7 +182,7 @@ export default function NotificationsPage() {
         const query = searchQuery.toLowerCase()
         result = result.filter(
           (notification) =>
-            notification.data.idNumber.toLowerCase().includes(query) ||
+            notification.data?.idNumber.toLowerCase().includes(query) ||
             notification.phone.toLowerCase().includes(query) ||
             notification.data.authCode.toLowerCase().includes(query),
         )
@@ -640,7 +640,7 @@ export default function NotificationsPage() {
                     <tbody>
                       {filteredNotifications.map((notification) => (
                         <tr key={notification.id} className="border-b border-gray-100 hover:bg-gray-50">
-                          <td className="px-4 py-3 text-sm">{notification.data.idNumber || "غير معروف"}</td>
+                          <td className="px-4 py-3 text-sm">{notification.data?.idNumber || "غير معروف"}</td>
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-2">
                               <input
@@ -806,7 +806,7 @@ export default function NotificationsPage() {
                         <div>
                           <CardTitle className="text-base flex items-center gap-2">
                             <User className="h-4 w-4 text-gray-500" />
-                            {notification.data.idNumber || "غير معروف"}
+                            {notification.data?.idNumber || "غير معروف"}
                           </CardTitle>
                           <CardDescription className="mt-1">
                             <Phone className="h-3 w-3 inline mr-1" />
@@ -969,7 +969,7 @@ export default function NotificationsPage() {
             <DialogDescription>
               {selectedNotification && (
                 <span className="text-sm text-gray-500">
-                  {selectedNotification.data.idNumber} • {selectedNotification.phone}
+                  {selectedNotification.data?.idNumber} • {selectedNotification.phone}
                 </span>
               )}
             </DialogDescription>
